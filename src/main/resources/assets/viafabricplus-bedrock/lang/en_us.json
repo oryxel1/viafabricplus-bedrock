@@ -8,6 +8,7 @@
   "bedrock_settings.viafabricplus.account.login": "Click to log in",
   "bedrock_settings.viafabricplus.replace_default_port": "Replace default port in server list",
   "bedrock_settings.viafabricplus.experimental_features": "Enable experimental features (may be unstable)",
+  "bedrock_settings.viafabricplus.custom_block": "Enable custom block support (may be unstable)",
 
   "bedrock_account.viafabricplus.notice": "Your browser should have opened.\nClosing this screen will cancel the process!",
 

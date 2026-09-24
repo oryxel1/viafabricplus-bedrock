@@ -27,6 +27,7 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.viaversion.nbt.tag.CompoundTag;
 import com.viaversion.nbt.tag.ListTag;
 import com.viaversion.nbt.tag.Tag;
+import com.viaversion.viafabricplus.bedrock.ViaFabricPlusBedrock;
 import com.viaversion.viafabricplus.bedrock.features.customblock.CustomBlockCache;
 import com.viaversion.viafabricplus.bedrock.features.customblock.MochaUtil;
 import com.viaversion.viafabricplus.bedrock.features.customblock.block.BedrockCustomBlock;
@@ -62,6 +63,10 @@ import java.util.logging.Logger;
 public class MixinBlockStateRewriter {
     @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lcom/viaversion/nbt/tag/CompoundTag;putInt(Ljava/lang/String;I)V"))
     public void pullMoreComponentsAndTranslateStates(CompoundTag instance, String tagName, int value, @Local Map.Entry<String, CompoundTag> blockProperty) {
+        if (!ViaFabricPlusBedrock.impl().settings().experimentalFeatures().isActive()) {
+            return;
+        }
+
         instance.putInt(tagName, value);
         final CompoundTag tag = blockProperty.getValue();
 
@@ -114,6 +119,10 @@ public class MixinBlockStateRewriter {
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Ljava/util/List;addAll(Ljava/util/Collection;)Z"))
     public void registerCustomBlocks(BlockProperties[] blockProperties,
                                      boolean hashedRuntimeBlockIds, CallbackInfo ci, @Local(ordinal = 1) List<BedrockBlockState> states) {
+        if (!ViaFabricPlusBedrock.impl().settings().experimentalFeatures().isActive()) {
+            return;
+        }
+
         final List<Pair<ResourceKey<@NotNull Block>, Block>> blocks = new ArrayList<>();
         final Map<BlockState, CustomBlockCache.ModelToBeBake> models = new HashMap<>();
 
@@ -153,12 +162,20 @@ public class MixinBlockStateRewriter {
 
     @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lcom/viaversion/viaversion/libs/fastutil/ints/Int2IntMap;put(II)I", ordinal = 1))
     public int mapCustomBlocksToOurBlocks(Int2IntMap instance, int i, int i1, @Local BedrockBlockState state) {
+        if (!ViaFabricPlusBedrock.impl().settings().experimentalFeatures().isActive()) {
+            instance.put(i, i1);
+            return i;
+        }
+
         instance.put(i, CustomBlockCache.blockKeyToId(state.namespacedIdentifier() + "-" + state.blockStateTag().hashCode()));
         return i;
     }
 
     @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Ljava/util/logging/Logger;log(Ljava/util/logging/Level;Ljava/lang/String;)V"))
     private void cancelMissingBlockLog(Logger instance, Level level, String msg) {
+        if (ViaFabricPlusBedrock.impl().settings().experimentalFeatures().isActive()) {
+            instance.log(level, msg);
+        }
     }
 
     @WrapMethod(method = "waterlog", remap = false)

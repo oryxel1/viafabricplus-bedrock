@@ -22,6 +22,7 @@
 package com.viaversion.viafabricplus.bedrock.injection.mixin.features.rewriter;
 
 import com.llamalad7.mixinextras.sugar.Local;
+import com.viaversion.viafabricplus.bedrock.ViaFabricPlusBedrock;
 import com.viaversion.viafabricplus.bedrock.injection.access.pack.IResourcePackStorage;
 import net.raphimc.viabedrock.api.resourcepack.ResourcePack;
 import net.raphimc.viabedrock.api.resourcepack.content.Content;
@@ -36,6 +37,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public class MixinResourcePackRewriter {
     @Inject(method = "bedrockToJava", at = @At("TAIL"))
     private static void addBlockTextures(ResourcePackStorage resourcePackStorage, CallbackInfoReturnable<Content> cir, @Local Content javaContent) {
+        if (!ViaFabricPlusBedrock.impl().settings().experimentalFeatures().isActive()) {
+            return;
+        }
+
         for (ResourcePack pack : resourcePackStorage.getPackStackBottomToTop()) {
             for (String set : ((IResourcePackStorage)resourcePackStorage).viaFabricPlus$texturesToLoad()) {
                 String fullPath = pack.content().getFullPath(set, "png", "jpg");

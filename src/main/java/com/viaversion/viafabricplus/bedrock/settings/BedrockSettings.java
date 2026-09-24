@@ -35,12 +35,14 @@ public final class BedrockSettings {
 
     private final BooleanSetting replaceDefaultPort;
     private final BooleanSetting experimentalFeatures;
+    private final BooleanSetting customBlockSupport;
 
     public BedrockSettings() {
         final SettingGroup group = ViaFabricPlus.api().settings().register("bedrock");
         group.register("account", new ActionSetting(Component.translatable("bedrock_settings.viafabricplus.account"), BedrockSettings::accountName, () -> ViaFabricPlusBedrock.impl().account().login()));
         this.replaceDefaultPort = group.registerBoolean("replace_default_port", true);
         this.experimentalFeatures = group.registerBoolean("experimental_features", true);
+        this.customBlockSupport = group.registerBoolean("custom_block", true);
     }
 
     private static Component accountName() {
@@ -66,6 +68,10 @@ public final class BedrockSettings {
 
     public BooleanSetting experimentalFeatures() {
         return this.experimentalFeatures;
+    }
+
+    public BooleanSetting customBlockSupport() {
+        return customBlockSupport;
     }
 
 }
