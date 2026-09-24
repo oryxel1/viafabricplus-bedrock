@@ -1,0 +1,362 @@
+/*
+ * This file is part of ViaFabricPlus Bedrock - https://github.com/florianreuth/viafabricplus-bedrock
+ * Copyright (C) 2021-2026 the original authors
+ *                         - Florian Reuth <git@florianreuth.de>
+ *                         - RK_01/RaphiMC
+ * Copyright (C) 2023-2026 ViaVersion and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+package com.viaversion.viafabricplus.bedrock.features.customblock.component;
+
+import com.mojang.math.OctahedralGroup;
+import com.viaversion.nbt.tag.CompoundTag;
+import com.viaversion.nbt.tag.FloatTag;
+import com.viaversion.nbt.tag.ListTag;
+import com.viaversion.nbt.tag.NumberTag;
+import com.viaversion.nbt.tag.Tag;
+import com.viaversion.viafabricplus.bedrock.features.customblock.CustomBlockCache;
+import com.viaversion.viafabricplus.bedrock.injection.access.pack.IModelDefinitions;
+import com.viaversion.viafabricplus.bedrock.injection.access.pack.IResourcePackStorage;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.shapes.BooleanOp;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import org.cube.converter.model.impl.bedrock.BedrockGeometryModel;
+import org.cube.converter.util.element.Direction;
+import org.cube.converter.util.element.Position3V;
+import java.util.EnumMap;
+
+/**
+ * Responsible for translating bedrock block components to java Block.
+ */
+public class BlockComponentsTranslator {
+    public static Result parseBlockComponents(Result.Builder builder, String identifier, CompoundTag components) {
+        if (!components.contains("minecraft:collision_box") && builder.collision == null || components.contains("minecraft:collision_box")) {
+            builder.collision(parseTagToVoxelShape(components.get("minecraft:collision_box")));
+        }
+        if (!components.contains("minecraft:selection_box") && builder.selection == null || components.contains("minecraft:selection_box")) {
+            builder.selection(parseTagToVoxelShape(components.get("minecraft:selection_box")));
+        }
+
+        if (components.contains("minecraft:friction")) {
+            Tag tag = components.get("minecraft:friction");
+            if (tag instanceof CompoundTag frictionTag && frictionTag.contains("value")) {
+                builder.friction(Math.max(0, 1 - frictionTag.getFloat("value")));
+            }
+        } else {
+            builder.friction(builder.friction == 0 ? 0.6f : 0f);
+        }
+
+        if (components.contains("minecraft:destructible_by_mining")) {
+            Tag tag = components.get("minecraft:destructible_by_mining");
+            if (tag instanceof NumberTag numberTag) {
+                builder.destroyTime(numberTag.asBoolean() ? 0 : -1);
+            } else if (tag instanceof CompoundTag compoundTag && compoundTag.contains("value")) {
+                builder.destroyTime(compoundTag.getFloat("value"));
+            }
+        }
+
+        if (components.contains("minecraft:destructible_by_mining")) {
+            Tag tag = components.get("minecraft:destructible_by_mining");
+            if (tag instanceof NumberTag numberTag) {
+                builder.destroyTime(numberTag.asBoolean() ? 0 : -1);
+            } else if (tag instanceof CompoundTag compoundTag && compoundTag.contains("value")) {
+                builder.destroyTime(compoundTag.getFloat("value"));
+            }
+        }
+
+        if (components.contains("minecraft:light_emission")) {
+            Tag tag = components.get("minecraft:light_emission");
+            if (tag instanceof CompoundTag lightTag && lightTag.contains("emission")) {
+                builder.lightEmission(lightTag.getByte("emission"));
+            }
+        }
+
+        // There's 2 way for a block to define its texture, first is through blocks.json in the texture pack which is what we're pulling here.
+        EnumMap<Direction, String> textures = ((IResourcePackStorage) CustomBlockCache.STORAGE_INSTANCE).viaFabricPlus$textures(identifier);
+
+        // Second is by sending the client a component called minecraft:material_instances with the texture path.
+        // From debugging, it seems like minecraft:material_instances has to be priority over blocks.json if they overlap each other.
+        CompoundTag materialInstance = components.getCompoundTag("minecraft:material_instances");
+        if (materialInstance != null) {
+            CompoundTag materials = materialInstance.getCompoundTag("materials");
+
+            // Each faces can have different texture, so we have to map them like this (https://wiki.bedrock.dev/blocks/block-visuals-intro#material-instances)
+            if (materials != null) {
+                textures = new EnumMap<>(Direction.class);
+                if (materials.contains("*")) {
+                    CompoundTag tag = materials.getCompoundTag("*");
+                    if (tag == null) {
+                        tag = materials.getCompoundTag(materials.getString("*"));
+                    }
+
+                    if (tag != null) {
+                        final String textureId = ((IResourcePackStorage)CustomBlockCache.STORAGE_INSTANCE).viaFabricPlus$texturesPathFromId(tag.getString("texture"));
+                        for (Direction direction : Direction.values()) {
+                            textures.put(direction, textureId);
+                        }
+                    }
+                }
+
+                for (Direction direction : Direction.values()) {
+                    putIfExist(direction, materials, textures);
+                }
+            }
+        }
+        builder.textures(textures);
+
+        if (components.contains("minecraft:geometry")) {
+            final String geometryId = components.getCompoundTag("minecraft:geometry").getString("identifier");
+            builder.model(((IModelDefinitions)CustomBlockCache.STORAGE_INSTANCE.getModels()).viaFabricPlus$getBlockModel(geometryId));
+        } else {
+            // If there's no geometry then fall back to the default model.
+            if (builder.model == null) {
+                builder.model(((IModelDefinitions)CustomBlockCache.STORAGE_INSTANCE.getModels()).viaFabricPlus$getBlockModel("minecraft:geometry.full_block"));
+            }
+        }
+
+        if (components.contains("minecraft:transformation")) {
+            final CompoundTag tag = components.getCompoundTag("minecraft:transformation");
+
+            Position3V translation = new Position3V(tag.getFloat("TX"), tag.getFloat("TY"), tag.getFloat("TZ"));
+            Position3V scale = new Position3V(tag.getFloat("SX"), tag.getFloat("SY"), tag.getFloat("SZ"));
+            Position3V rotation = new Position3V(tag.getFloat("RX"), tag.getFloat("RY"), tag.getFloat("RZ"));
+            rotation.scale(90);
+
+            builder.transformation(new CustomBlockCache.Transformation(translation, rotation, scale));
+
+            VoxelShape collision = builder.collision, selection = builder.selection;
+            switch ((int) Mth.wrapDegrees(rotation.getX())) {
+                case -90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_X_NEG);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_X_NEG);
+                }
+                case 90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_X_POS);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_X_POS);
+                }
+                case -180 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.BLOCK_ROT_X_180);
+                    selection = Shapes.rotate(selection, OctahedralGroup.BLOCK_ROT_X_180);
+                }
+            }
+            switch ((int) Mth.wrapDegrees(rotation.getY())) {
+                case -90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_Y_NEG);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_Y_NEG);
+                }
+                case 90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_Y_POS);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_Y_POS);
+                }
+                case -180 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.BLOCK_ROT_Y_180);
+                    selection = Shapes.rotate(selection, OctahedralGroup.BLOCK_ROT_Y_180);
+                }
+            }
+            switch ((int) Mth.wrapDegrees(rotation.getZ())) {
+                case -90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_Y_NEG);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_Y_NEG);
+                }
+                case 90 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.ROT_90_Y_POS);
+                    selection = Shapes.rotate(selection, OctahedralGroup.ROT_90_Y_POS);
+                }
+                case -180 -> {
+                    collision = Shapes.rotate(collision, OctahedralGroup.BLOCK_ROT_Y_180);
+                    selection = Shapes.rotate(selection, OctahedralGroup.BLOCK_ROT_Y_180);
+                }
+            }
+
+            builder.collision(collision);
+            builder.selection(selection);
+        }
+
+        return builder.build();
+    }
+
+    // Add more data into block state tag so we can read it later.
+    public static void pullComponents(CompoundTag instance, CompoundTag components) {
+        if (components.contains("minecraft:collision_box")) {
+            instance.put("minecraft:collision_box", components.get("minecraft:collision_box"));
+        }
+
+        if (components.contains("minecraft:selection_box")) {
+            instance.put("minecraft:selection_box", components.get("minecraft:selection_box"));
+        }
+
+        if (components.contains("minecraft:geometry")) {
+            instance.put("minecraft:geometry", components.get("minecraft:geometry"));
+        }
+
+        if (components.contains("minecraft:destructible_by_mining")) {
+            instance.put("minecraft:destructible_by_mining", components.get("minecraft:destructible_by_mining"));
+        }
+
+        if (components.contains("minecraft:friction")) {
+            instance.put("minecraft:friction", components.get("minecraft:friction"));
+        }
+
+        if (components.contains("minecraft:material_instances")) {
+            instance.put("minecraft:material_instances", components.get("minecraft:material_instances"));
+        }
+
+        if (components.contains("minecraft:transformation")) {
+            instance.put("minecraft:transformation", components.get("minecraft:transformation"));
+        }
+
+        if (components.contains("minecraft:light_emission")) {
+            instance.put("minecraft:light_emission", components.get("minecraft:light_emission"));
+        }
+    }
+
+    private static void putIfExist(final Direction direction, CompoundTag tag, final EnumMap<Direction, String> map) {
+        final String name = direction.name().toLowerCase();
+        if (tag.contains(name)) {
+            CompoundTag compoundTag = tag.getCompoundTag(name);
+            try {
+                if (compoundTag == null) {
+                    compoundTag = tag.getCompoundTag(tag.getString(name));
+                }
+
+                String result = ((IResourcePackStorage)CustomBlockCache.STORAGE_INSTANCE).viaFabricPlus$texturesPathFromId(compoundTag.getString("texture"));
+                map.put(direction, result);
+            } catch (Exception ignored){
+                map.putIfAbsent(direction, "empty");
+            }
+        } else {
+            map.putIfAbsent(direction, "empty");
+        }
+    }
+
+    private static VoxelShape parseTagToVoxelShape(Tag tag) {
+        // If there are no component (or it's a weird one), then it will default to the default value (full block shape).
+        if (!(tag instanceof NumberTag) && !(tag instanceof CompoundTag)) {
+            return Shapes.block();
+        }
+
+        if (tag instanceof NumberTag numberTag) {
+            return numberTag.asBoolean() ? Shapes.block() : Shapes.empty();
+        }
+
+        final CompoundTag compoundTag = (CompoundTag) tag;
+        if (!compoundTag.getBoolean("enabled")) {
+            return Shapes.empty();
+        }
+
+        if (compoundTag.contains("boxes")) {
+            VoxelShape finalShape = Shapes.empty();
+            for (CompoundTag box : compoundTag.getListTag("boxes", CompoundTag.class)) {
+                finalShape = Shapes.join(finalShape, parseNewBoxFormatToVoxelShape(box), BooleanOp.OR);
+            }
+
+            return finalShape;
+        }
+
+        return parseOldBoxFormatToVoxelShape(compoundTag);
+    }
+
+    private static VoxelShape parseNewBoxFormatToVoxelShape(CompoundTag box) {
+        return Shapes.box(
+            box.getFloat("minX") / 16f,
+            box.getFloat("minY") / 16f,
+            box.getFloat("minZ") / 16f,
+            box.getFloat("maxX") / 16f,
+            box.getFloat("maxY") / 16f,
+            box.getFloat("maxZ") / 16f
+        );
+    }
+
+    private static VoxelShape parseOldBoxFormatToVoxelShape(CompoundTag box) {
+        ListTag<FloatTag> origin = box.getListTag("origin", FloatTag.class);
+        ListTag<FloatTag> size = box.getListTag("size", FloatTag.class);
+        if (origin == null || size == null) {
+            return Shapes.empty();
+        }
+
+        float minX = (origin.get(0).asFloat() + 8.0F) / 16.0F;
+        float minY = origin.get(1).asFloat() / 16.0F;
+        float minZ = (origin.get(2).asFloat() + 8.0F) / 16.0F;
+        float maxX = minX + size.get(0).asFloat() / 16.0F;
+        float maxY = minY + size.get(1).asFloat() / 16.0F;
+        float maxZ = minZ + size.get(2).asFloat() / 16.0F;
+        return Shapes.box(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    public record Result(VoxelShape collision,
+                         VoxelShape selection, float friction, float destroyTime,
+                         int lightEmission, CustomBlockCache.Transformation transformation,
+                         EnumMap<Direction, String> textures, BedrockGeometryModel model) {
+        public Result.Builder toBuilder() {
+            final Result.Builder builder = new Builder();
+            builder.collision(collision);
+            builder.selection(selection);
+            builder.friction(friction);
+            builder.destroyTime(destroyTime);
+            builder.textures(textures);
+            builder.model(model);
+            return builder;
+        }
+
+        public static class Builder {
+            private VoxelShape collision, selection;
+            private float friction, destroyTime;
+
+            private int lightEmission;
+            private CustomBlockCache.Transformation transformation = new CustomBlockCache.Transformation(Position3V.zero(), Position3V.zero(), new Position3V(1, 1, 1));
+
+            private EnumMap<Direction, String> textures;
+            private BedrockGeometryModel model;
+
+            public void collision(VoxelShape collision) {
+                this.collision = collision;
+            }
+
+            public void selection(VoxelShape selection) {
+                this.selection = selection;
+            }
+
+            public void friction(float friction) {
+                this.friction = friction;
+            }
+
+            public void destroyTime(float destroyTime) {
+                this.destroyTime = destroyTime;
+            }
+
+            public void textures(EnumMap<Direction, String> textures) {
+                this.textures = textures;
+            }
+
+            public void model(BedrockGeometryModel model) {
+                this.model = model;
+            }
+
+            public void lightEmission(int lightEmission) {
+                this.lightEmission = lightEmission;
+            }
+
+            public void transformation(CustomBlockCache.Transformation transformation) {
+                this.transformation = transformation;
+            }
+
+            public Result build() {
+                return new Result(collision, selection, friction, destroyTime, lightEmission, transformation, textures, model);
+            }
+        }
+    }
+}
